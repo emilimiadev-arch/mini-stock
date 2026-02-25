@@ -138,4 +138,80 @@ def clear_assignments() -> None:
         sb = client()
         payload = {"assigned_to": None, "updated_at": _now_iso()}
         sb.table("items").update(payload).neq("assigned_to", None).execute()
+        sb.table("cash_items").update(payload).neq("assigned_to", None).execute()
+    _wrap(_)
+
+
+# -------------------------
+# Cash CRUD
+# -------------------------
+def list_cash() -> List[Dict[str, Any]]:
+    def _():
+        sb = client()
+        res = sb.table("cash_items").select("*").order("created_at", desc=False).execute()
+        data = res.data or []
+        for row in data:
+            at = row.get("assigned_to")
+            if at == "A":
+                row["assigned_to"] = "Redo"
+            elif at == "B":
+                row["assigned_to"] = "Emi"
+            else:
+                row["assigned_to"] = None
+        return data
+    return _wrap(_)
+
+
+def add_cash(label: str, currency: str, amount: float) -> None:
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("El label es obligatorio.")
+
+    def _():
+        sb = client()
+        sb.table("cash_items").insert({
+            "label": label,
+            "currency": currency,
+            "amount": float(amount or 0),
+            "updated_at": _now_iso(),
+        }).execute()
+    _wrap(_)
+
+
+def update_cash(item_id: str, label: str, currency: str, amount: float) -> None:
+    label = (label or "").strip()
+    if not label:
+        raise ValueError("El label es obligatorio.")
+
+    def _():
+        sb = client()
+        sb.table("cash_items").update({
+            "label": label,
+            "currency": currency,
+            "amount": float(amount or 0),
+            "updated_at": _now_iso(),
+        }).eq("id", item_id).execute()
+    _wrap(_)
+
+
+def delete_cash(item_id: str) -> None:
+    def _():
+        sb = client()
+        sb.table("cash_items").delete().eq("id", item_id).execute()
+    _wrap(_)
+
+
+def set_cash_assignment(item_id: str, assigned_to: Optional[str]) -> None:
+    """assigned_to: 'Redo', 'Emi', or None (unassign)"""
+    if assigned_to not in ("Redo", "Emi", None):
+        raise ValueError("assigned_to must be 'Redo', 'Emi', or None.")
+
+    db_value = "A" if assigned_to == "Redo" else ("B" if assigned_to == "Emi" else None)
+
+    def _():
+        sb = client()
+        sb.table("cash_items").update({
+            "assigned_to": db_value,
+            "updated_at": _now_iso(),
+        }).eq("id", item_id).execute()
     _wrap(_)
