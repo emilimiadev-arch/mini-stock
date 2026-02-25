@@ -154,6 +154,7 @@ else:
 
     edited = st.data_editor(
         edit_df,
+        key="instr_editor",
         column_config={
             "id": None,
             "name": st.column_config.TextColumn("Nombre", required=True),
@@ -180,10 +181,11 @@ else:
 
     if st.button("Guardar cambios", type="primary"):
         try:
-            for _, row in edited[edited["Eliminar"]].iterrows():
+            _del = edited.get("Eliminar", pd.Series(False, index=edited.index)).astype(bool)
+            for _, row in edited[_del].iterrows():
                 db.delete_item(row["id"])
 
-            for _, new in edited[~edited["Eliminar"]].iterrows():
+            for _, new in edited[~_del].iterrows():
                 orig_rows = df[df["id"] == new["id"]]
                 if orig_rows.empty:
                     continue
@@ -258,6 +260,7 @@ cash_edit_df["Eliminar"] = False
 
 cash_edited = st.data_editor(
     cash_edit_df,
+    key="cash_editor",
     column_config={
         "id": None,
         "currency": st.column_config.SelectboxColumn("Moneda", options=px.CURRENCIES, required=True),
@@ -281,10 +284,11 @@ st.caption("Editá celdas directamente · marcá 'Eliminar' para borrar · el va
 
 if st.button("Guardar caja", type="primary"):
     try:
-        for _, row in cash_edited[cash_edited["Eliminar"]].iterrows():
+        _del_cash = cash_edited.get("Eliminar", pd.Series(False, index=cash_edited.index)).astype(bool)
+        for _, row in cash_edited[_del_cash].iterrows():
             db.delete_cash(row["id"])
 
-        for _, new in cash_edited[~cash_edited["Eliminar"]].iterrows():
+        for _, new in cash_edited[~_del_cash].iterrows():
             orig_rows = cash_df[cash_df["id"] == new["id"]] if not cash_df.empty else pd.DataFrame()
             if orig_rows.empty:
                 currency = new.get("currency") or "USD"
