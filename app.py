@@ -148,6 +148,10 @@ else:
     edit_df["description"] = edit_df["description"].fillna("")
     edit_df["Eliminar"] = False
 
+    # Cap table height to 10 rows; scroll if more
+    _ROW_PX, _HDR_PX, _MAX_ROWS = 35, 38, 10
+    instr_h = min(len(edit_df), _MAX_ROWS) * _ROW_PX + _HDR_PX
+
     edited = st.data_editor(
         edit_df,
         column_config={
@@ -163,8 +167,15 @@ else:
         num_rows="fixed",
         hide_index=True,
         use_container_width=True,
+        height=instr_h,
     )
 
+    total_instr = float(edit_df["avg_value"].sum())
+    st.markdown(
+        f"<div style='text-align:right; font-weight:600; margin-bottom:4px'>"
+        f"Total: ${total_instr:,.2f} USD</div>",
+        unsafe_allow_html=True,
+    )
     st.caption("Editá celdas directamente · marcá 'Eliminar' para borrar · el promedio se actualiza al guardar.")
 
     if st.button("Guardar cambios", type="primary"):
@@ -243,7 +254,7 @@ else:
 cash_edit_df = cash_df[["id", "currency", "amount", "amount_usd", "assigned_to"]].copy() \
     if not cash_df.empty else \
     pd.DataFrame(columns=["id", "currency", "amount", "amount_usd", "assigned_to"])
-cash_edit_df["🗑️"] = False
+cash_edit_df["Eliminar"] = False
 
 cash_edited = st.data_editor(
     cash_edit_df,
@@ -260,6 +271,12 @@ cash_edited = st.data_editor(
     use_container_width=True,
 )
 
+total_cash = float(cash_edit_df["amount_usd"].sum()) if not cash_df.empty else 0.0
+st.markdown(
+    f"<div style='text-align:right; font-weight:600; margin-bottom:4px'>"
+    f"Total: ${total_cash:,.2f} USD</div>",
+    unsafe_allow_html=True,
+)
 st.caption("Editá celdas directamente · marcá 'Eliminar' para borrar · el valor USD se actualiza al guardar.")
 
 if st.button("Guardar caja", type="primary"):
