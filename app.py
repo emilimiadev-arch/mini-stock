@@ -14,17 +14,58 @@ load_dotenv(dotenv_path=ENV_PATH)
 st.set_page_config(page_title="Inventory Split", page_icon="🎸", layout="wide")
 st.title("🎸 Inventario")
 
-# Simple password gate (for now)
+# Mobile-friendly: stack columns vertically on small screens
+st.markdown("""
+<style>
+@media (max-width: 768px) {
+    /* Stack all Streamlit columns vertically */
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    /* Give number inputs more breathing room */
+    [data-testid="stNumberInput"] { margin-bottom: 0.5rem; }
+    /* Make metric boxes full-width */
+    [data-testid="metric-container"] { width: 100% !important; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Simple password gate
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 if APP_PASSWORD:
-    with st.sidebar:
-        st.caption("Access")
-        pwd = st.text_input("Password", type="password")
-    if pwd != APP_PASSWORD:
-        st.warning("Enter password to continue.")
-        st.stop()
+    if not st.session_state.get("authenticated"):
+        with st.sidebar:
+            st.caption("Acceso")
+            pwd = st.text_input("Contraseña", type="password")
+        if pwd != APP_PASSWORD:
+            if pwd:
+                st.warning("Contraseña incorrecta.")
+            else:
+                st.info("Ingresá la contraseña para continuar.")
+            st.stop()
+        else:
+            st.session_state["authenticated"] = True
+            st.rerun()
 
 page = st.sidebar.radio("Navigate", ["Instrumentos", "Repartija", "Resumen"], index=0)
+
+
+def check_connection() -> bool:
+    try:
+        db.ping()
+        return True
+    except db.ConnectionError as e:
+        st.error(f"⚠️ Sin conexión con la base de datos: {e}")
+        return False
+    except Exception as e:
+        st.error(f"⚠️ Error inesperado al conectar: {e}")
+        return False
+
+
+if not check_connection():
+    st.stop()
 
 
 def calc_avg_value(row) -> float:
@@ -32,6 +73,27 @@ def calc_avg_value(row) -> float:
     b = float(row.get("price_b") or 0)
     q = float(row.get("quantity") or 1)
     return q * (a + b) / 2.0
+
+
+def auto_assign_all(df_all: pd.DataFrame) -> None:
+    """Greedy: asigna los items sin asignar balanceando por avg_value."""
+    unassigned = df_all[df_all["assigned_to"].isna()].copy()
+    if unassigned.empty:
+        return
+
+    assigned_a = df_all[df_all["assigned_to"] == "Redo"].copy()
+    assigned_b = df_all[df_all["assigned_to"] == "Emi"].copy()
+    running_a = float(assigned_a["avg_value"].sum()) if not assigned_a.empty else 0.0
+    running_b = float(assigned_b["avg_value"].sum()) if not assigned_b.empty else 0.0
+
+    unassigned = unassigned.sort_values("avg_value", ascending=False)
+    for _, r in unassigned.iterrows():
+        if running_a <= running_b:
+            db.set_assignment(r["id"], "Redo")
+            running_a += float(r["avg_value"] or 0)
+        else:
+            db.set_assignment(r["id"], "Emi")
+            running_b += float(r["avg_value"] or 0)
 
 
 def load_items_df() -> pd.DataFrame:
@@ -154,36 +216,6 @@ elif page == "Repartija":
     c1.metric("Total Redo (promedio)", f"${total_a:,.2f}")
     c2.metric("Total Emi (promedio)", f"${total_b:,.2f}")
     c3.metric("Diferencia Redo-Emi", f"${diff:,.2f}")
-
-    def auto_assign_all(df_all: pd.DataFrame) -> None:
-        # Work with unassigned only
-        unassigned = df_all[df_all["assigned_to"].isna()].copy()
-        if unassigned.empty:
-            st.info("No hay instrumentos sin asignar.")
-            return
-
-        # Current totals
-        assigned_a = df_all[df_all["assigned_to"] == "Redo"].copy()
-        assigned_b = df_all[df_all["assigned_to"] == "Emi"].copy()
-        running_a = float(assigned_a["avg_value"].sum()) if not assigned_a.empty else 0.0
-        running_b = float(assigned_b["avg_value"].sum()) if not assigned_b.empty else 0.0
-
-        # Greedy: assign most expensive first to the side that is behind
-        unassigned = unassigned.sort_values("avg_value", ascending=False)
-
-        updates = []
-        for _, r in unassigned.iterrows():
-            if running_a <= running_b:
-                updates.append((r["id"], "Redo"))
-                running_a += float(r["avg_value"] or 0)
-            else:
-                updates.append((r["id"], "Emi"))
-                running_b += float(r["avg_value"] or 0)
-
-        # Apply updates
-        for item_id, who in updates:
-            db.set_assignment(item_id, who)
-
 
     with st.expander("🤖 Asignación automática", expanded=False):
         st.write("Asigna automáticamente todos los instrumentos sin asignar para balancear usando el promedio.")
@@ -316,20 +348,6 @@ elif page == "Resumen":
 
     st.divider()
 
-    def prep_export(dfx: pd.DataFrame) -> pd.DataFrame:
-        out = dfx.copy()
-        out["avg_value"] = out["avg_value"].astype(float)
-        out = out.rename(columns={
-            "name": "item",
-            "description": "description",
-            "price_a": "price_a_usd",
-            "price_b": "price_b_usd",
-            "avg_value": "avg_value_usd",
-            "assigned_to": "assigned_to",
-        })
-        cols = ["item", "description", "price_a_usd", "price_b_usd", "avg_value_usd", "assigned_to"]
-        return out[cols]
-
     left, right = st.columns(2)
 
     with left:
@@ -343,9 +361,6 @@ elif page == "Resumen":
             })
             st.dataframe(view_a[["Instrumento", "Descripción", "Precio Redo", "Precio Emi", "Promedio"]], width="stretch")
 
-            csv_a = prep_export(df_a).to_csv(index=False).encode("utf-8")
-            st.download_button("Descargar CSV (Redo)", data=csv_a, file_name="asignados_Redo.csv", mime="text/csv")
-
     with right:
         st.markdown("### Asignados a Emi")
         if df_b.empty:
@@ -357,9 +372,6 @@ elif page == "Resumen":
             })
             st.dataframe(view_b[["Instrumento", "Descripción", "Precio Redo", "Precio Emi", "Promedio"]], width="stretch")
 
-            csv_b = prep_export(df_b).to_csv(index=False).encode("utf-8")
-            st.download_button("Descargar CSV (Emi)", data=csv_b, file_name="asignados_Emi.csv", mime="text/csv")
-
     st.divider()
     st.markdown("### Sin asignar")
     if df_u.empty:
@@ -370,6 +382,3 @@ elif page == "Resumen":
             "price_a": "Precio Redo", "price_b": "Precio Emi", "avg_value": "Promedio"
         })
         st.dataframe(view_u[["Instrumento", "Descripción", "Precio Redo", "Precio Emi", "Promedio"]], width="stretch")
-
-        csv_u = prep_export(df_u).to_csv(index=False).encode("utf-8")
-        st.download_button("Descargar CSV (sin asignar)", data=csv_u, file_name="sin_asignar.csv", mime="text/csv")
