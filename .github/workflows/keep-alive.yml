@@ -11,21 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Supabase
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          python3 - <<'EOF'
-          import os, urllib.request, json, sys
-
-          url  = os.environ["SUPABASE_URL"].rstrip("/")
-          key  = os.environ["SUPABASE_ANON_KEY"]
-
-          req = urllib.request.Request(
-              f"{url}/rest/v1/items?select=id&limit=1",
-              headers={"apikey": key, "Authorization": f"Bearer {key}"},
-          )
-          with urllib.request.urlopen(req, timeout=10) as r:
-              data = json.loads(r.read())
-              print(f"Supabase OK — {len(data)} row(s) returned")
-          EOF
+          curl --fail --silent --show-error \
+            -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/items?select=id&limit=1"
+          echo "Supabase OK"
