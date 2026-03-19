@@ -1,0 +1,31 @@
+name: Keep Supabase alive
+
+on:
+  schedule:
+    # Runs every 4 days at 08:00 UTC (well within the 7-day pause window)
+    - cron: "0 8 */4 * *"
+  workflow_dispatch: # allow manual trigger from GitHub UI
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          python3 - <<'EOF'
+          import os, urllib.request, json, sys
+
+          url  = os.environ["SUPABASE_URL"].rstrip("/")
+          key  = os.environ["SUPABASE_ANON_KEY"]
+
+          req = urllib.request.Request(
+              f"{url}/rest/v1/items?select=id&limit=1",
+              headers={"apikey": key, "Authorization": f"Bearer {key}"},
+          )
+          with urllib.request.urlopen(req, timeout=10) as r:
+              data = json.loads(r.read())
+              print(f"Supabase OK — {len(data)} row(s) returned")
+          EOF
